@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"/>
+<title>ButterReads Wrapped — three.js spike</title>
+<style>
+  :root { --ink:#0b0710; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { background:var(--ink); color:#fff; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+  .story { height:100dvh; width:100vw; overflow-y:scroll; scroll-snap-type:y mandatory; }
+  .card { position:relative; height:100dvh; width:100vw; scroll-snap-align:start; overflow:hidden; display:flex; flex-direction:column; }
+  canvas.bg { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  .overlay { position:relative; z-index:2; height:100%; display:flex; flex-direction:column; justify-content:space-between; padding:max(28px,6vh) 26px max(40px,7vh); pointer-events:none; }
+  .kicker { font-size:12px; letter-spacing:.28em; text-transform:uppercase; font-weight:700; opacity:.8; }
+  .headline { font-size:clamp(30px,8.5vw,58px); font-weight:800; line-height:1.02; letter-spacing:-0.02em; text-wrap:balance; }
+  .headline em { font-style:normal; background:linear-gradient(90deg,#ffd479,#ff8bd0); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .bignum { font-size:clamp(84px,30vw,210px); font-weight:850; line-height:.86; letter-spacing:-0.04em; background:linear-gradient(180deg,#fff, #ffd479 70%,#ff9d5c); -webkit-background-clip:text; background-clip:text; color:transparent; filter:drop-shadow(0 8px 40px rgba(255,160,80,.35)); }
+  .sub { font-size:16px; opacity:.72; margin-top:6px; }
+  .statrow { display:flex; gap:26px; margin-top:18px; }
+  .stat b { display:block; font-size:26px; font-weight:800; }
+  .stat span { font-size:12px; opacity:.62; letter-spacing:.06em; text-transform:uppercase; }
+  .brand { display:flex; align-items:center; gap:8px; font-weight:800; letter-spacing:-0.01em; opacity:.9; }
+  .brand .dot { width:10px; height:10px; border-radius:3px; background:linear-gradient(135deg,#ffd479,#ff8bd0); }
+  .legend { display:flex; flex-wrap:wrap; gap:10px 16px; margin-top:14px; }
+  .legend div { display:flex; align-items:center; gap:7px; font-size:14px; opacity:.85; }
+  .legend i { width:11px; height:11px; border-radius:50%; display:inline-block; }
+  .hint { position:fixed; bottom:10px; left:0; right:0; text-align:center; font-size:11px; letter-spacing:.2em; text-transform:uppercase; opacity:.4; z-index:5; }
+</style>
+</head>
+<body>
+<div class="story" id="story">
+  <section class="card" id="c1">
+    <canvas class="bg" id="bg1"></canvas>
+    <div class="overlay">
+      <div class="brand"><span class="dot"></span> ButterReads Wrapped</div>
+      <div>
+        <div class="kicker">You read</div>
+        <div class="bignum">47</div>
+        <div class="headline"><em>books</em> this year</div>
+        <div class="sub">That's 14,203 pages — about 9 days of pure reading.</div>
+        <div class="statrow">
+          <div class="stat"><b>14.2k</b><span>Pages</span></div>
+          <div class="stat"><b>3.9</b><span>Books / mo</span></div>
+          <div class="stat"><b>Top 6%</b><span>of readers</span></div>
+        </div>
+      </div>
+      <div class="kicker" style="opacity:.5">Scroll ↓</div>
+    </div>
+  </section>
+
+  <section class="card" id="c2">
+    <canvas class="bg" id="bg2"></canvas>
+    <div class="overlay">
+      <div class="brand"><span class="dot"></span> ButterReads Wrapped</div>
+      <div>
+        <div class="kicker">Your genre DNA</div>
+        <div class="headline">Literary at heart, <em>sci-fi</em> curious.</div>
+        <div class="legend" id="legend2"></div>
+      </div>
+      <div class="kicker" style="opacity:.5">A living helix of what you read</div>
+    </div>
+  </section>
+</div>
+<div class="hint">three.js spike · not production</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+/* ---------- Card 1: rotating stack of glowing book spines + dust ---------- */
+function card1() {
+  const canvas = document.getElementById('bg1');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+  cam.position.set(0, 1.5, 9);
+  cam.lookAt(0, 0.8, 0);
+
+  // gradient backdrop
+  scene.background = null;
+  const grad = new THREE.Mesh(
+    new THREE.PlaneGeometry(60, 60),
+    new THREE.ShaderMaterial({
+      uniforms:{}, depthWrite:false,
+      vertexShader:`varying vec2 v; void main(){ v=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+      fragmentShader:`varying vec2 v; void main(){ vec3 a=vec3(0.10,0.03,0.14); vec3 b=vec3(0.34,0.06,0.22); vec3 c=vec3(0.65,0.22,0.10); float t=v.y; vec3 col=mix(a,b,smoothstep(0.0,0.6,t)); col=mix(col,c,smoothstep(0.55,1.0,t)); gl_FragColor=vec4(col,1.0);} `
+    })
+  );
+  grad.position.set(0,0,-12); scene.add(grad);
+
+  const stack = new THREE.Group();
+  const colors = [0xffd479,0xff8bd0,0x8b7bff,0x5ad0c0,0xff9d5c,0xff6f91,0x7ae0ff];
+  const N = 12;
+  for (let i=0;i<N;i++){
+    const w = 3.2 + Math.random()*0.5, h = 0.34, d = 2.2;
+    const geo = new THREE.BoxGeometry(w,h,d);
+    const col = colors[i%colors.length];
+    const mat = new THREE.MeshStandardMaterial({ color:col, roughness:0.35, metalness:0.15, emissive:col, emissiveIntensity:0.18 });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.y = -2.0 + i*(h+0.06);
+    m.rotation.y = (Math.random()-0.5)*0.5;
+    m.position.x = (Math.random()-0.5)*0.5;
+    stack.add(m);
+  }
+  stack.position.y = 0.6;
+  scene.add(stack);
+
+  // floating dust particles
+  const pc = 260; const pg = new THREE.BufferGeometry();
+  const pos = new Float32Array(pc*3);
+  for (let i=0;i<pc;i++){ pos[i*3]=(Math.random()-0.5)*18; pos[i*3+1]=(Math.random()-0.5)*14; pos[i*3+2]=(Math.random()-0.5)*10-2; }
+  pg.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  const dust = new THREE.Points(pg, new THREE.PointsMaterial({ color:0xffe0b0, size:0.05, transparent:true, opacity:0.55 }));
+  scene.add(dust);
+
+  scene.add(new THREE.AmbientLight(0xffffff,0.6));
+  const key = new THREE.PointLight(0xffd0a0, 60, 40); key.position.set(4,6,6); scene.add(key);
+  const rim = new THREE.PointLight(0xff7bd0, 40, 40); rim.position.set(-6,2,4); scene.add(rim);
+
+  function resize(){ const r=canvas.getBoundingClientRect(); renderer.setSize(r.width,r.height,false); cam.aspect=r.width/r.height; cam.updateProjectionMatrix(); }
+  resize(); addEventListener('resize', resize);
+  let t=0;
+  (function loop(){ t+=0.01; stack.rotation.y = Math.sin(t*0.5)*0.5 + t*0.15; stack.position.y = 0.6 + Math.sin(t)*0.08; dust.rotation.y = t*0.05; renderer.render(scene,cam); requestAnimationFrame(loop); })();
+}
+
+/* ---------- Card 2: genre DNA double helix ---------- */
+function card2() {
+  const canvas = document.getElementById('bg2');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(45,1,0.1,100);
+  cam.position.set(0,0,10);
+
+  const grad = new THREE.Mesh(new THREE.PlaneGeometry(60,60),
+    new THREE.ShaderMaterial({ depthWrite:false,
+      vertexShader:`varying vec2 v; void main(){v=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+      fragmentShader:`varying vec2 v; void main(){ vec3 a=vec3(0.05,0.06,0.16); vec3 b=vec3(0.20,0.10,0.30); gl_FragColor=vec4(mix(a,b,v.y),1.0);} ` }));
+  grad.position.set(0,0,-12); scene.add(grad);
+
+  const genres = [
+    {name:'Literary', col:0xffd479, pct:34},
+    {name:'Sci-Fi', col:0x7ae0ff, pct:24},
+    {name:'Fantasy', col:0x8b7bff, pct:18},
+    {name:'Mystery', col:0xff8bd0, pct:14},
+    {name:'Nonfiction', col:0x5ad0c0, pct:10},
+  ];
+  const legend = document.getElementById('legend2');
+  legend.innerHTML = genres.map(g=>`<div><i style="background:#${g.col.toString(16).padStart(6,'0')}"></i>${g.name} ${g.pct}%</div>`).join('');
+
+  const helix = new THREE.Group();
+  const turns = 3, per = 18, total = turns*per;
+  for (let i=0;i<total;i++){
+    const a = i/per * Math.PI*2;
+    const y = (i/total - 0.5)*9;
+    const g = genres[i%genres.length];
+    for (const side of [1,-1]){
+      const s = new THREE.Mesh(new THREE.SphereGeometry(0.18,16,16),
+        new THREE.MeshStandardMaterial({ color:g.col, emissive:g.col, emissiveIntensity:0.5, roughness:0.3 }));
+      s.position.set(Math.cos(a)*2.2*side*Math.sign(1), y, Math.sin(a)*2.2*side);
+      s.position.x = Math.cos(a)*2.2*side;
+      helix.add(s);
+    }
+  }
+  scene.add(helix);
+  scene.add(new THREE.AmbientLight(0xffffff,0.7));
+  const p1=new THREE.PointLight(0xffffff,50,50); p1.position.set(5,5,8); scene.add(p1);
+
+  function resize(){ const r=canvas.getBoundingClientRect(); renderer.setSize(r.width,r.height,false); cam.aspect=r.width/r.height; cam.updateProjectionMatrix(); }
+  resize(); addEventListener('resize', resize);
+  let t=0;
+  (function loop(){ t+=0.008; helix.rotation.y = t; renderer.render(scene,cam); requestAnimationFrame(loop); })();
+}
+
+card1(); card2();
+</script>
+</body>
+</html>
