@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"/>
+<title>ButterReads · Library Dive (three.js spike)</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:#0a0602;color:#f6ecd8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Georgia,serif;overflow:hidden;-webkit-font-smoothing:antialiased}
+  #c{position:fixed;inset:0;display:block;touch-action:none}
+  .brand{position:fixed;top:max(20px,4vh);left:22px;z-index:5;display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.01em;font-size:14px;color:#f4e4c1;text-shadow:0 2px 12px #000}
+  .brand .dot{width:11px;height:11px;border-radius:3px;background:linear-gradient(135deg,#ffd479,#ff9d5c);box-shadow:0 0 16px #ffb060}
+  .tag{position:fixed;top:max(20px,4vh);right:18px;z-index:5;font-size:10px;letter-spacing:.18em;text-transform:uppercase;opacity:.4}
+  .title{position:fixed;left:0;right:0;top:38%;text-align:center;z-index:4;transition:opacity 1.6s ease 0.4s;padding:0 24px;text-shadow:0 3px 24px #000}
+  .title h1{font-size:clamp(30px,7vw,56px);font-weight:600;letter-spacing:.01em}
+  .title h1 em{font-style:italic;color:#ffce7a}
+  .title p{margin-top:12px;font-size:15px;opacity:.8;font-family:-apple-system,sans-serif}
+  .hint{position:fixed;left:0;right:0;bottom:max(26px,5vh);text-align:center;z-index:4;font-size:12px;letter-spacing:.14em;text-transform:uppercase;opacity:.55;font-family:-apple-system,sans-serif;text-shadow:0 2px 10px #000}
+  #tip{position:fixed;z-index:6;pointer-events:none;transform:translate(-50%,-140%);background:rgba(20,12,4,.86);border:1px solid rgba(255,206,122,.35);color:#ffe9c2;padding:7px 12px;border-radius:9px;font-size:13px;font-family:-apple-system,sans-serif;white-space:nowrap;opacity:0;transition:opacity .18s;backdrop-filter:blur(4px);box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  #tip b{color:#fff;font-weight:600}
+  #tip span{opacity:.7;font-style:italic}
+  .vig{position:fixed;inset:0;z-index:3;pointer-events:none;background:radial-gradient(ellipse at 50% 42%,transparent 45%,rgba(5,2,0,.6) 100%)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="vig"></div>
+<div class="brand"><span class="dot"></span>ButterReads · Your Library</div>
+<div class="tag">three.js spike</div>
+<div class="title" id="title"><h1>Step into <em>your</em> library.</h1><p>Every book you loved — waiting on the shelves.</p></div>
+<div class="hint" id="hint">drag to look · scroll to wander · tap a book</div>
+<div id="tip"></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0602);
+scene.fog = new THREE.FogExp2(0x0a0602, 0.032);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 300);
+
+// ---- lighting (warm, low-key) ----
+scene.add(new THREE.HemisphereLight(0x3a2a12, 0x080402, 0.55));
+scene.add(new THREE.AmbientLight(0x3a2606, 0.5));
+const lantern = new THREE.PointLight(0xffb060, 2.2, 26, 1.6); // travels with the reader
+scene.add(lantern);
+
+// ---- structure dims ----
+const AISLE = 3.4;              // half-width of walkway
+const BAY = 4.0, BAYS = 13;     // shelf bays along z
+const Z0 = 4, Z1 = Z0 - BAY*BAYS;
+const SHELVES = 5, SHELF_Y0 = 0.7, SHELF_DY = 1.5;
+const shelfTop = SHELF_Y0 + SHELF_DY*(SHELVES-1);
+
+// ---- floor / ceiling / carpet ----
+const woodMat = new THREE.MeshStandardMaterial({ color:0x2a1a0d, roughness:0.85, metalness:0.05 });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(AISLE*2+9, (BAYS+2)*BAY), new THREE.MeshStandardMaterial({color:0x140c06,roughness:0.7,metalness:0.15}));
+floor.rotation.x = -Math.PI/2; floor.position.set(0,0,(Z0+Z1)/2); scene.add(floor);
+const ceil = floor.clone(); ceil.position.y = shelfTop+2.0; ceil.rotation.x = Math.PI/2; scene.add(ceil);
+const carpet = new THREE.Mesh(new THREE.PlaneGeometry(1.7,(BAYS+2)*BAY), new THREE.MeshStandardMaterial({color:0x5a1420,emissive:0x3a0a12,emissiveIntensity:0.6,roughness:0.6}));
+carpet.rotation.x = -Math.PI/2; carpet.position.set(0,0.01,(Z0+Z1)/2); scene.add(carpet);
+
+// ---- shelf frames (instanced boards) ----
+const boardGeo = new THREE.BoxGeometry(0.9, 0.08, 1);
+let boardCount = 0;
+for(let s=0;s<2;s++) for(let b=0;b<BAYS;b++) boardCount += SHELVES+1;
+const boards = new THREE.InstancedMesh(boardGeo, woodMat, boardCount + 2*BAYS*2);
+const dummy = new THREE.Object3D();
+let bi=0;
+for(let side=0; side<2; side++){
+  const sx = side===0 ? -AISLE : AISLE;
+  for(let b=0;b<BAYS;b++){
+    const cz = Z0 - b*BAY - BAY/2;
+    for(let s=0;s<=SHELVES;s++){
+      dummy.position.set(sx + (side===0?-0.35:0.35), SHELF_Y0 - 0.4 + s*SHELF_DY, cz);
+      dummy.scale.set(1, 1, BAY*0.92);
+      dummy.rotation.set(0,0,0); dummy.updateMatrix(); boards.setMatrixAt(bi++, dummy.matrix);
+    }
+    // vertical posts
+    for(let p=-1;p<=1;p+=2){
+      dummy.position.set(sx + (side===0?-0.35:0.35), shelfTop/2+0.3, cz + p*BAY/2);
+      dummy.scale.set(1, (shelfTop+1.2)/0.08, 0.18); dummy.rotation.set(0,0,0); dummy.updateMatrix();
+      boards.setMatrixAt(bi++, dummy.matrix);
+    }
+  }
+}
+boards.count = bi; scene.add(boards);
+
+// ---- BOOKS (instanced, per-instance color, pickable) ----
+const palette = [0x7a1f2b,0x9c6b1e,0x274d3d,0x1f3a5c,0x5a2a55,0x8a3a1a,0x2f5d4a,0x6a1530,0xb08030];
+const bookGeo = new THREE.BoxGeometry(1,1,1);
+const bookMat = new THREE.MeshStandardMaterial({ roughness:0.65, metalness:0.08, emissiveIntensity:0.0 });
+const perShelf = 20;
+const maxBooks = 2*BAYS*SHELVES*perShelf;
+const books = new THREE.InstancedMesh(bookGeo, bookMat, maxBooks);
+books.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(maxBooks*3), 3);
+const col = new THREE.Color();
+const bookData = []; // {pos, rotY, scl, popX}
+let n=0;
+for(let side=0; side<2; side++){
+  const sx = side===0 ? -AISLE+0.55 : AISLE-0.55;
+  const popX = side===0 ? 1 : -1; // pop toward the aisle centre
+  for(let b=0;b<BAYS;b++){
+    const cz = Z0 - b*BAY - BAY/2;
+    for(let s=0;s<SHELVES;s++){
+      const y = SHELF_Y0 + s*SHELF_DY + 0.02;
+      for(let k=0;k<perShelf;k++){
+        const z = cz - BAY*0.42 + (k/(perShelf-1))*BAY*0.84;
+        const h = 0.75 + Math.random()*0.5;
+        const w = 0.16 + Math.random()*0.05;
+        const d = 0.62 + Math.random()*0.12;
+        const tilt = (Math.random()-0.5)*0.08;
+        const pos = new THREE.Vector3(sx + (Math.random()-0.5)*0.05, y + h/2, z);
+        const scl = new THREE.Vector3(d, h, w);
+        dummy.position.copy(pos); dummy.rotation.set(0, tilt, 0); dummy.scale.copy(scl);
+        dummy.updateMatrix(); books.setMatrixAt(n, dummy.matrix);
+        col.setHex(palette[(Math.random()*palette.length)|0]);
+        books.setColorAt(n, col);
+        bookData.push({ pos, rotY:tilt, scl, popX });
+        n++;
+      }
+    }
+  }
+}
+books.count = n; books.instanceMatrix.needsUpdate = true; if(books.instanceColor) books.instanceColor.needsUpdate = true;
+scene.add(books);
+
+// ---- lanterns (emissive orbs → bloom) ----
+const orbGeo = new THREE.SphereGeometry(0.13, 16, 16);
+const orbMat = new THREE.MeshStandardMaterial({ color:0xffcf8a, emissive:0xffb45a, emissiveIntensity:6, toneMapped:false });
+for(let b=0;b<BAYS;b++){
+  const cz = Z0 - b*BAY - BAY/2;
+  for(let side=-1; side<=1; side+=2){
+    const o = new THREE.Mesh(orbGeo, orbMat);
+    o.position.set(side*(AISLE-0.15), shelfTop-0.3 + Math.sin(b)*0.2, cz);
+    scene.add(o);
+  }
+}
+// hero glowing book at the end of the aisle
+const heroMat = new THREE.MeshStandardMaterial({ color:0xffe6b0, emissive:0xffca66, emissiveIntensity:5.5, toneMapped:false, roughness:0.3 });
+const hero = new THREE.Mesh(new THREE.BoxGeometry(0.9,1.3,0.22), heroMat);
+hero.position.set(0, 2.1, Z1 + 2.0); scene.add(hero);
+const heroLight = new THREE.PointLight(0xffca66, 3, 12, 2); heroLight.position.copy(hero.position); scene.add(heroLight);
+
+// ---- dust motes ----
+const dustN = 900, dpos = new Float32Array(dustN*3);
+for(let i=0;i<dustN;i++){ dpos[i*3]=(Math.random()-0.5)*(AISLE*2+2); dpos[i*3+1]=Math.random()*(shelfTop+1.5); dpos[i*3+2]=Z0-Math.random()*(BAY*BAYS); }
+const dust = new THREE.Points(new THREE.BufferGeometry().setAttribute('position',new THREE.BufferAttribute(dpos,3)),
+  new THREE.PointsMaterial({ color:0xffd9a0, size:0.035, transparent:true, opacity:0.6, depthWrite:false }));
+scene.add(dust);
+
+// ---- camera rig + controls ----
+let walk = 0;               // 0..1 progress down the aisle
+const walkStartZ = Z0 + 3.5, walkEndZ = Z1 + 5.0;
+function aisleZ(){ return walkStartZ + (walkEndZ - walkStartZ) * walk; }
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.enablePan = false; controls.enableZoom = false;
+controls.minPolarAngle = Math.PI*0.28; controls.maxPolarAngle = Math.PI*0.62;
+controls.rotateSpeed = 0.5;
+camera.position.set(0, 2.4, walkStartZ);
+controls.target.set(0, 2.0, walkStartZ - 5);
+
+let scrollBoost = 0;
+addEventListener('wheel', e=>{ scrollBoost += e.deltaY*0.00012; }, {passive:true});
+let ty=null;
+addEventListener('touchstart', e=>{ if(e.touches.length===1) ty=e.touches[0].clientY; }, {passive:true});
+addEventListener('touchmove', e=>{ if(ty!=null){ const dy=ty-e.touches[0].clientY; scrollBoost += dy*0.00016; ty=e.touches[0].clientY; } }, {passive:true});
+
+// ---- picking ----
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const tip = document.getElementById('tip');
+const titles = [
+  ['The Name of the Wind','Patrick Rothfuss'],['Piranesi','Susanna Clarke'],['Circe','Madeline Miller'],
+  ['Dune','Frank Herbert'],['The Secret History','Donna Tartt'],['Klara and the Sun','Kazuo Ishiguro'],
+  ['A Little Life','Hanya Yanagihara'],['The Night Circus','Erin Morgenstern'],['Project Hail Mary','Andy Weir'],
+  ['Babel','R.F. Kuang'],['The Goldfinch','Donna Tartt'],['Norwegian Wood','Haruki Murakami']
+];
+let picked = -1;
+function resetPicked(){
+  if(picked<0) return;
+  const d = bookData[picked];
+  dummy.position.copy(d.pos); dummy.rotation.set(0,d.rotY,0); dummy.scale.copy(d.scl);
+  dummy.updateMatrix(); books.setMatrixAt(picked, dummy.matrix); books.instanceMatrix.needsUpdate = true;
+  picked = -1; tip.style.opacity = 0;
+}
+function pickAt(x,y){
+  ndc.x = (x/innerWidth)*2-1; ndc.y = -(y/innerHeight)*2+1;
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObject(books, false)[0];
+  if(!hit || hit.instanceId==null){ resetPicked(); return; }
+  const id = hit.instanceId;
+  if(id===picked) return;
+  resetPicked();
+  picked = id;
+  const d = bookData[id];
+  dummy.position.copy(d.pos); dummy.position.x += d.popX*0.28; dummy.position.y += 0.05;
+  dummy.rotation.set(0, d.rotY + d.popX*0.25, 0); dummy.scale.copy(d.scl);
+  dummy.updateMatrix(); books.setMatrixAt(id, dummy.matrix); books.instanceMatrix.needsUpdate = true;
+  const t = titles[id % titles.length];
+  tip.innerHTML = `<b>${t[0]}</b><br><span>${t[1]}</span>`;
+  const wp = new THREE.Vector3(d.pos.x + d.popX*0.28, d.pos.y + d.scl.y*0.4, d.pos.z).project(camera);
+  tip.style.left = ((wp.x*0.5+0.5)*innerWidth)+'px';
+  tip.style.top = ((-wp.y*0.5+0.5)*innerHeight)+'px';
+  tip.style.opacity = 1;
+}
+let downX=0,downY=0,moved=false;
+canvas.addEventListener('pointerdown', e=>{ downX=e.clientX; downY=e.clientY; moved=false; });
+canvas.addEventListener('pointermove', e=>{ if(Math.abs(e.clientX-downX)+Math.abs(e.clientY-downY)>8) moved=true; });
+canvas.addEventListener('pointerup', e=>{ if(!moved) pickAt(e.clientX, e.clientY); });
+
+// ---- post ----
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.85, 0.55, 0.55);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+function resize(){
+  renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight);
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  bloom.resolution.set(innerWidth,innerHeight);
+}
+addEventListener('resize', resize);
+
+// fade the intro title out once you move
+const titleEl = document.getElementById('title'), hintEl = document.getElementById('hint');
+const clock = new THREE.Clock();
+function loop(){
+  const t = clock.getElapsedTime();
+  // advance walk: gentle auto-drift + scroll
+  walk += (0.010 + scrollBoost) * 0.6;
+  scrollBoost *= 0.86;
+  walk = Math.max(0, Math.min(1, walk));
+  const z = aisleZ();
+  // move rig forward while preserving user's look offset
+  const dz = z - camera.position.z;
+  camera.position.z += dz; controls.target.z += dz;
+  lantern.position.set(camera.position.x, camera.position.y+0.6, camera.position.z-1.5);
+  // hero bob
+  hero.rotation.y = t*0.4; hero.position.y = 2.1 + Math.sin(t*1.3)*0.12; heroLight.position.copy(hero.position);
+  dust.rotation.y = t*0.01;
+  // keep tooltip glued to its book
+  if(picked>=0){ const d=bookData[picked]; const wp=new THREE.Vector3(d.pos.x+d.popX*0.28,d.pos.y+d.scl.y*0.4,d.pos.z).project(camera);
+    tip.style.left=((wp.x*0.5+0.5)*innerWidth)+'px'; tip.style.top=((-wp.y*0.5+0.5)*innerHeight)+'px'; }
+  if(walk>0.02){ titleEl.style.opacity=0; }
+  hintEl.style.opacity = walk>0.15 ? 0 : 0.55;
+  controls.update();
+  composer.render();
+  requestAnimationFrame(loop);
+}
+resize(); loop();
+</script>
+</body>
+</html>
